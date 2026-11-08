@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Iterable
 
 from .env import SYSTEM_PROMPT, ShellTaskEnv
+from .shaping import assistant_text, group_advantages, is_degenerate  # noqa: F401  (re-export)
 
 Policy = Callable[[list[dict]], str]
 
@@ -42,9 +43,19 @@ class OpenAIChatPolicy:
         return data["choices"][0]["message"]["content"] or ""
 
 
-def run_episode(env: ShellTaskEnv, policy: Policy, system_prompt: str = SYSTEM_PROMPT) -> dict:
+def run_episode(env: ShellTaskEnv, policy: Policy, system_prompt: str = SYSTEM_PROMPT,
+                repetition_zero: bool = True) -> dict:
+    """Play one episode. Any exception (sandbox, network, model server) is an
+    infra error: the trajectory is kept for debugging but flagged
+    ``infra_error`` so it does not count as a policy failure."""
     t0 = time.time()
     messages = [{"role": "system", "content": system_prompt}]
+
+    def out(reward: float, info: dict, infra: bool = False) -> dict:
+        return {"task_id": env.task.get("id"), "messages": messages, "reward": reward,
+                "turns": env.turn, "info": info, "infra_error": infra,
+                "seconds": round(time.time() - t0, 2)}
+
     try:
         messages.append({"role": "user", "content": env.reset()})
         while True:
@@ -52,12 +63,14 @@ def run_episode(env: ShellTaskEnv, policy: Policy, system_prompt: str = SYSTEM_P
             messages.append({"role": "assistant", "content": action})
             step = env.step(action)
             if step.done:
-                return {"task_id": env.task.get("id"), "messages": messages, "reward": step.reward,
-                        "turns": env.turn, "info": step.info, "seconds": round(time.time() - t0, 2)}
+                result = out(step.reward, step.info)
+                if repetition_zero and is_degenerate(assistant_text(result)):
+                    result["info"]["repetition_zeroed"] = result["reward"]
+                    result["reward"] = 0.0
+                return result
             messages.append({"role": "user", "content": step.observation})
     except Exception as e:
-        return {"task_id": env.task.get("id"), "messages": messages, "reward": 0.0, "turns": env.turn,
-                "info": {"error": f"{type(e).__name__}: {e}"}, "seconds": round(time.time() - t0, 2)}
+        return out(0.0, {"error": f"{type(e).__name__}: {e}"}, infra=True)
     finally:
         env.close()
 
@@ -75,19 +88,6 @@ def run_episodes(client, policy: Policy, tasks: Iterable[dict], *, samples_per_t
 
     with ThreadPoolExecutor(max_workers=parallel) as pool:
         return list(pool.map(one, jobs))
-
-
-def group_advantages(trajectories: list[dict], key: str = "task_id") -> list[dict]:
-    """Add GRPO-style group-normalised advantages: (r - mean_group) / (std_group + eps)."""
-    groups: dict = {}
-    for t in trajectories:
-        groups.setdefault(t[key], []).append(t["reward"])
-    for t in trajectories:
-        rs = groups[t[key]]
-        mean = sum(rs) / len(rs)
-        std = (sum((r - mean) ** 2 for r in rs) / len(rs)) ** 0.5
-        t["advantage"] = (t["reward"] - mean) / (std + 1e-6)
-    return trajectories
 
 
 def write_jsonl(path: str, rows: Iterable[dict]) -> None:

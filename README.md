@@ -62,8 +62,8 @@ system dirs. Containers and Apptainer for cgroups or HPC.
 <td valign="top">
 
 **Hack-resistant judging**<br>
-The judge never shares a process with model code. Five classic reward
-hacks are part of the test suite and all score 0.
+The judge never shares a process or a sandbox with model code. Known
+reward hacks are part of the test suite and all score 0.
 
 </td>
 <td valign="top">
@@ -251,11 +251,52 @@ user     5050  [exit code 0]
 assistant  SUBMIT                                   -> hidden verifier runs -> reward 1.0
 ```
 
-Files persist between turns. At the end, hidden `verify_files` are written
-and `verify` runs:
+Files persist between turns. When the episode ends, the verifier does not
+run in the sandbox the agent controlled:
 
-- exit 0 gives reward 1, anything else gives 0;
-- a `FLOTILLA_REWARD=<float>` line in its output gives partial credit instead.
+1. The agent's `/work` is packed and rebuilt on the host. Only regular files
+   and directories survive, so symlinks, devices and absolute or `..` paths
+   are dropped.
+2. It is unpacked into a **fresh sandbox**, where the task's input files
+   outside `/work` are written again unmodified and `setup` runs again.
+3. The hidden `verify_files` are written and `verify` runs:
+   - exit 0 gives reward 1, anything else gives 0;
+   - a `FLOTILLA_REWARD=<float>` line in its output gives partial credit
+     instead.
+
+Overwriting a reference file, planting something in `/tmp`, or leaving a
+module for the verifier to import therefore has no effect. Deliverables must
+live in `/work`. Use `isolated_verify=False` only for tasks whose result is
+state outside it.
+
+### Training signal hygiene
+
+```python
+from flotilla.rl import filter_groups, group_advantages, length_penalty
+
+trajs = run_episodes(fl, policy, tasks, samples_per_task=8)
+trajs = group_advantages(length_penalty(trajs))
+batch, stats = filter_groups(trajs)
+# stats: groups, kept_groups, uniform_groups, too_few_valid, infra_rollouts
+```
+
+- **Infra errors are not policy failures.** A sandbox that fails to boot or
+  a model server that times out flags the rollout `infra_error` instead of
+  scoring it 0. Flagged rollouts get advantage 0 and are left out of their
+  group's mean and std, so a flaky node cannot push the rest of the group's
+  advantages around.
+  - `CodeVerifier.score()` marks the same cases with `Score.infra`.
+  - `rewards()`, for trainers that cannot mask samples, substitutes
+    `infra_reward`.
+- **Groups with no signal are dropped.** If every valid rollout in a group
+  scored the same, the group contributes zero gradient. `filter_groups`
+  removes these groups and reports how many there were.
+- **Degenerate repetition scores 0.** Long text whose word 4-gram
+  uniqueness falls below 0.15 is scored 0. The check runs after verification
+  and before any group step, so nothing later can overwrite it.
+- **Length penalty.** When most of a group passes, longer passing rollouts
+  lose up to 0.2, scaled linearly from the group's 30th-percentile length to
+  the longest. On hard tasks, where few pass, nothing is penalised.
 
 See [`examples/tasks/shell_tasks.jsonl`](examples/tasks/shell_tasks.jsonl) for
 the task format, and run
@@ -277,9 +318,19 @@ process that holds the expected values.
 | return an object whose `__eq__` is always true | outputs are JSON-serialised before comparison | 0 |
 | fork a daemon that overwrites the result file later | the judge is a child subreaper and kills every descendant before writing | 0 |
 
-Each row is a test in [`tests/test_rl.py`](tests/test_rl.py). The last one
-was confirmed to score 1.0 with the protection switched off, so the test
-proves the protection works. `assert` mode (tests as Python source) is also
+For multi-turn tasks, the verifier runs in a separate sandbox:
+
+| Attack by the agent | What stops it | Reward |
+|---|---|:-:|
+| overwrite the reference answer the verifier compares against | the verifier gets a fresh sandbox, with task inputs restored | 0 |
+| plant files in `/tmp` or outside `/work` for the verifier to pick up | only `/work` is carried over | 0 |
+| symlink a workspace file to a path outside `/work` | links are dropped when the workspace is rebuilt | 0 |
+
+Each row is a test in [`tests/test_rl.py`](tests/test_rl.py) or
+[`tests/test_shaping.py`](tests/test_shaping.py). Two attacks were also run
+with the protection switched off, and both scored 1.0 there: the late-writer
+daemon (code verifier) and the reference overwrite (multi-turn). So those
+tests prove the protections work. `assert` mode (tests as Python source) is also
 supported for convenience, but it shares a process with the solution. Prefer
 `io` mode for training.
 
@@ -335,9 +386,9 @@ flotilla/session.py     persistent sandboxes for multi-turn environments
 flotilla/backends/      bwrap, docker/podman, apptainer, local
 flotilla/server.py      HTTP API (stdlib)
 flotilla/client.py      one client for in-process and remote use
-flotilla/rl/            code verifier + harness, shell task env, rollouts, TRL adapter
+flotilla/rl/            code verifier + harness, shell task env, rollouts, reward shaping, TRL adapter
 examples/               task sets, eval, GRPO training, rollout collection
-tests/                  swarm, isolation, reward-hacking and server tests
+tests/                  swarm, isolation, reward-hacking, shaping and server tests
 ```
 
 ## Tests

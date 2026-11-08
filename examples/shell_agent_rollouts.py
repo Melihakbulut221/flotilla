@@ -7,8 +7,10 @@
     python examples/shell_agent_rollouts.py --base-url http://localhost:8000/v1 --model my-model \\
         --samples 8 --out rollouts.jsonl
 
-Each output line is one episode: messages, reward, turns, verifier info and
-a group-normalised advantage, ready for rejection sampling or GRPO.
+Each output line is one episode: messages, reward, turns, verifier info,
+an infra_error flag and a group-normalised advantage. Groups with no learning
+signal (every rollout scored the same) are reported and left out of the
+output, ready for rejection sampling or GRPO.
 """
 
 import argparse
@@ -19,7 +21,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from flotilla import Flotilla  # noqa: E402
-from flotilla.rl import OpenAIChatPolicy, group_advantages, run_episodes, write_jsonl  # noqa: E402
+from flotilla.rl import (  # noqa: E402
+    OpenAIChatPolicy,
+    filter_groups,
+    group_advantages,
+    length_penalty,
+    run_episodes,
+    write_jsonl,
+)
 
 
 def scripted_policy(messages):
@@ -55,14 +64,19 @@ def main():
         ap.error("use --scripted or give --base-url and --model")
 
     fl = Flotilla(base_url=args.url)
-    trajs = group_advantages(run_episodes(fl, policy, tasks, samples_per_task=args.samples,
-                                          parallel=args.parallel))
-    write_jsonl(args.out, trajs)
+    trajs = run_episodes(fl, policy, tasks, samples_per_task=args.samples, parallel=args.parallel)
+    trajs = group_advantages(length_penalty(trajs))
     for t in trajs:
-        err = t["info"].get("error")
+        err = t["info"].get("error") or t["info"].get("verify_error")
         print(f"{t['task_id']:16s} sample {t['sample']}  reward {t['reward']:.2f}  turns {t['turns']}"
-              + (f"  error: {err}" if err else ""))
-    print(f"wrote {len(trajs)} episodes to {args.out}")
+              + ("  [infra]" if t["infra_error"] else "") + (f"  {err}" if err else ""))
+    if args.samples > 1:
+        kept, stats = filter_groups(trajs)
+        print(f"group stats: {stats}")
+    else:  # a group of one has no GRPO signal; keep every valid episode
+        kept = [t for t in trajs if not t["infra_error"]]
+    write_jsonl(args.out, kept)
+    print(f"wrote {len(kept)} of {len(trajs)} episodes to {args.out}")
 
 
 if __name__ == "__main__":

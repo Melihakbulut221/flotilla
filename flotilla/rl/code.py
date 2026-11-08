@@ -21,6 +21,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .shaping import is_degenerate
+
 HARNESS_SRC = (Path(__file__).parent / "harness.py").read_text()
 _FENCE = re.compile(r"```[ \t]*([A-Za-z0-9_+-]*)[ \t]*\n(.*?)```", re.S)
 
@@ -56,6 +58,7 @@ class Score:
     total: int
     error: str | None = None
     status: str = "scored"
+    infra: bool = False  # sandbox failure, not the policy's fault
 
     def to_dict(self) -> dict:
         return self.__dict__.copy()
@@ -75,6 +78,8 @@ class CodeVerifier:
         require_fence: bool = True,
         language: str = "python",
         python: str = "python3",
+        repetition_zero: bool = True,
+        infra_reward: float = 0.0,
     ):
         self.client = client
         self.timeout = timeout
@@ -86,6 +91,8 @@ class CodeVerifier:
         self.require_fence = require_fence
         self.language = language
         self.python = python
+        self.repetition_zero = repetition_zero
+        self.infra_reward = infra_reward
 
     def _task_json(self, task: dict) -> str:
         tests = task["tests"]
@@ -113,7 +120,11 @@ class CodeVerifier:
         scores: list[Score | None] = [None] * len(completions)
         inputs, slots = [], []
         for i, (c, t) in enumerate(zip(completions, tasks)):
-            code = extract_code(completion_text(c), self.language, self.require_fence)
+            text = completion_text(c)
+            if self.repetition_zero and is_degenerate(text):
+                scores[i] = Score(0.0, 0, 0, "degenerate repetition", status="repetition")
+                continue
+            code = extract_code(text, self.language, self.require_fence)
             if not code or not code.strip():
                 scores[i] = Score(0.0, 0, 0, "no code block", status="format")
                 continue
@@ -136,8 +147,14 @@ class CodeVerifier:
         return scores  # type: ignore[return-value]
 
     def _parse(self, sb: dict) -> Score:
+        err = sb.get("error") or ""
+        if sb["status"] == "cancelled" or err.startswith("boot failed"):
+            return Score(0.0, 0, 0, err or "cancelled", status=sb["status"], infra=True)
         if not sb.get("result"):
-            return Score(0.0, 0, 0, sb.get("error") or "no result", status=sb["status"])
+            # the harness always writes a result unless the sandbox itself was
+            # killed (timeout); a clean exit without one means a broken harness
+            infra = sb["status"] == "succeeded"
+            return Score(0.0, 0, 0, err or "no result", status=sb["status"], infra=infra)
         try:
             r = json.loads(sb["result"])
             passed, total = int(r["passed"]), max(1, int(r["total"]))
@@ -148,7 +165,9 @@ class CodeVerifier:
         return Score(reward, passed, total, r.get("error"))
 
     def rewards(self, completions: list[Any], tasks: list[dict]) -> list[float]:
-        return [s.reward for s in self.score(completions, tasks)]
+        """Plain floats for trainers that cannot mask samples. Infra failures
+        get ``infra_reward``; use ``score()`` to see and drop them instead."""
+        return [self.infra_reward if s.infra else s.reward for s in self.score(completions, tasks)]
 
 
 def trl_reward_func(verifier: CodeVerifier, tests_key: str = "tests", entry_point_key: str = "entry_point"):
