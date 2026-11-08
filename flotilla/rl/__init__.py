@@ -2,7 +2,8 @@
 
 from .code import CodeVerifier, Score, extract_code, trl_reward_func
 from .env import SYSTEM_PROMPT, ShellTaskEnv, StepResult, parse_action
-from .rollout import OpenAIChatPolicy, run_episode, run_episodes, write_jsonl
+from .tools import TOOL_SYSTEM_PROMPT, TOOLS, ToolTaskEnv, parse_tool_calls, render_tools_prompt
+from .rollout import OpenAIChatPolicy, OpenAIToolPolicy, run_episode, run_episodes, write_jsonl
 from .shaping import (
     filter_groups,
     group_advantages,
@@ -20,7 +21,13 @@ __all__ = [
     "StepResult",
     "SYSTEM_PROMPT",
     "parse_action",
+    "ToolTaskEnv",
+    "TOOLS",
+    "TOOL_SYSTEM_PROMPT",
+    "parse_tool_calls",
+    "render_tools_prompt",
     "OpenAIChatPolicy",
+    "OpenAIToolPolicy",
     "run_episode",
     "run_episodes",
     "group_advantages",

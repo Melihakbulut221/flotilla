@@ -46,8 +46,9 @@ is the reward. Drops into TRL's `GRPOTrainer`.
 <td width="33%" valign="top">
 
 **Multi-turn tool use**<br>
-Persistent sandboxes where the policy runs shell commands across turns,
-then a hidden verifier scores the final state.
+Native function calling (bash, read, write, edit, grep, glob, submit) or
+plain shell blocks in persistent sandboxes. A hidden verifier scores the
+final state.
 
 </td>
 </tr>
@@ -269,6 +270,52 @@ module for the verifier to import therefore has no effect. Deliverables must
 live in `/work`. Use `isolated_verify=False` only for tasks whose result is
 state outside it.
 
+### Tool-calling agents
+
+`ToolTaskEnv` gives the policy real functions instead of text conventions,
+the same shape coding agents use in production:
+
+| Tool | What it does |
+|---|---|
+| `bash(command, timeout?)` | runs in `/work`, no network; returns output and exit code |
+| `read(path, offset?, limit?)` | numbered lines, 500 by default |
+| `write(path, content)` | creates parent directories |
+| `edit(path, old_string, new_string, replace_all?)` | exact replacement; refuses an ambiguous match |
+| `grep(pattern, path?, glob?, ignore_case?)` | `path:line:text` matches |
+| `glob(pattern, path?)` | `**/*.py` style file listing |
+| `submit(summary?)` | ends the episode and runs the verifier |
+
+```python
+from flotilla.rl import OpenAIToolPolicy, ToolTaskEnv, run_episodes
+
+# vllm serve my-model --enable-auto-tool-choice --tool-call-parser hermes
+policy = OpenAIToolPolicy("http://localhost:8000/v1", "my-model")
+trajs = run_episodes(fl, policy, tasks, samples_per_task=8, env_cls=ToolTaskEnv)
+```
+
+Three call encodings are accepted:
+
+- native `tool_calls` from the server;
+- Hermes `<tool_call>{"name": ..., "arguments": ...}</tool_call>` in the
+  text;
+- Qwen3-Coder `<tool_call><function=...><parameter=...>` XML in the text.
+
+The text encodings let a model served without a tool parser be trained the
+same way: pass `native_tools=False` and the schemas are rendered into the
+system prompt.
+
+Episodes and turns:
+
+- Each assistant message is one turn, with at most
+  `max_tool_calls_per_turn` calls.
+- Long results are cut in the middle, so both the head and the tail of a
+  traceback stay visible.
+- A malformed call is answered with an error and counted in
+  `info["tool_errors"]`, which you can penalise. Examples are an unknown
+  tool, invalid JSON, a missing argument, or a write to a read-only dir.
+- The episode ends on `submit`, on a turn without any tool call, or at
+  `max_turns`. Verification is the isolated kind described above.
+
 ### Training signal hygiene
 
 ```python
@@ -386,9 +433,9 @@ flotilla/session.py     persistent sandboxes for multi-turn environments
 flotilla/backends/      bwrap, docker/podman, apptainer, local
 flotilla/server.py      HTTP API (stdlib)
 flotilla/client.py      one client for in-process and remote use
-flotilla/rl/            code verifier + harness, shell task env, rollouts, reward shaping, TRL adapter
+flotilla/rl/            code verifier + harness, shell and tool-calling envs, rollouts, reward shaping, TRL adapter
 examples/               task sets, eval, GRPO training, rollout collection
-tests/                  swarm, isolation, reward-hacking, shaping and server tests
+tests/                  swarm, isolation, reward-hacking, shaping, tool-calling and server tests
 ```
 
 ## Tests

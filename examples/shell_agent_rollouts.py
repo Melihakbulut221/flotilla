@@ -2,10 +2,20 @@
 
     # dry run with a scripted policy that solves fix-off-by-one (no model needed)
     python examples/shell_agent_rollouts.py --scripted
+    python examples/shell_agent_rollouts.py --scripted --tools
 
     # your model behind an OpenAI-compatible server, 8 samples per task (a GRPO group)
     python examples/shell_agent_rollouts.py --base-url http://localhost:8000/v1 --model my-model \\
         --samples 8 --out rollouts.jsonl
+
+    # function calling: serve with a tool-call parser ...
+    #   vllm serve my-model --enable-auto-tool-choice --tool-call-parser hermes
+    python examples/shell_agent_rollouts.py --tools --base-url http://localhost:8000/v1 --model my-model
+    # ... or without one: tools are described in the prompt, calls parsed from text
+    python examples/shell_agent_rollouts.py --tools --text-protocol --base-url ... --model my-model
+
+Without --tools the policy acts with ```bash``` blocks and SUBMIT; with
+--tools it calls bash/read/write/edit/grep/glob/submit functions.
 
 Each output line is one episode: messages, reward, turns, verifier info,
 an infra_error flag and a group-normalised advantage. Groups with no learning
@@ -23,6 +33,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from flotilla import Flotilla  # noqa: E402
 from flotilla.rl import (  # noqa: E402
     OpenAIChatPolicy,
+    OpenAIToolPolicy,
+    ShellTaskEnv,
+    ToolTaskEnv,
     filter_groups,
     group_advantages,
     length_penalty,
@@ -42,6 +55,25 @@ def scripted_policy(messages):
             "SUBMIT"][min(n_actions, 2)]
 
 
+def _call(name, **args):
+    return {"id": f"call_{name}", "type": "function",
+            "function": {"name": name, "arguments": json.dumps(args)}}
+
+
+def scripted_tool_policy(messages):
+    """The same fix as scripted_policy, through function calls."""
+    n_actions = sum(m["role"] == "assistant" for m in messages)
+    if "stats.py" not in messages[1]["content"]:
+        return {"role": "assistant", "content": "", "tool_calls": [_call("submit")]}
+    steps = [
+        [_call("read", path="stats.py")],
+        [_call("edit", path="stats.py", old_string="range(1, 100)", new_string="range(1, 101)"),
+         _call("bash", command="python3 stats.py")],
+        [_call("submit", summary="fixed the range end")],
+    ]
+    return {"role": "assistant", "content": "", "tool_calls": steps[min(n_actions, 2)]}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tasks", default=str(Path(__file__).parent / "tasks" / "shell_tasks.jsonl"))
@@ -53,18 +85,25 @@ def main():
     ap.add_argument("--parallel", type=int, default=8)
     ap.add_argument("--out", default="rollouts.jsonl")
     ap.add_argument("--url", help="flotilla server; default runs sandboxes in-process")
+    ap.add_argument("--tools", action="store_true", help="function-calling environment")
+    ap.add_argument("--text-protocol", action="store_true",
+                    help="with --tools: describe tools in the prompt and parse calls from text")
     args = ap.parse_args()
 
     tasks = [json.loads(line) for line in open(args.tasks) if line.strip()]
     if args.scripted:
-        policy = scripted_policy
+        policy = scripted_tool_policy if args.tools else scripted_policy
     elif args.base_url and args.model:
-        policy = OpenAIChatPolicy(args.base_url, args.model, api_key=args.api_key)
+        native = args.tools and not args.text_protocol
+        cls = OpenAIToolPolicy if native else OpenAIChatPolicy
+        policy = cls(args.base_url, args.model, api_key=args.api_key)
     else:
         ap.error("use --scripted or give --base-url and --model")
 
     fl = Flotilla(base_url=args.url)
-    trajs = run_episodes(fl, policy, tasks, samples_per_task=args.samples, parallel=args.parallel)
+    trajs = run_episodes(fl, policy, tasks, samples_per_task=args.samples, parallel=args.parallel,
+                         env_cls=ToolTaskEnv if args.tools else ShellTaskEnv,
+                         episode_kwargs={"native_tools": not args.text_protocol})
     trajs = group_advantages(length_penalty(trajs))
     for t in trajs:
         err = t["info"].get("error") or t["info"].get("verify_error")
