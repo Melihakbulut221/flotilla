@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flotilla-rl"
+version = "0.1.0"
+description = "Self-hosted sandbox swarms and RL environments for LLM training"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Hasan Melih" }]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+trl = ["trl>=0.14", "datasets", "transformers", "accelerate"]
+
+[project.scripts]
+flotilla = "flotilla.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["flotilla*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
