@@ -7,3 +7,4 @@ dist/
 runs/
 rollouts.jsonl
 .venv/
+.claude/

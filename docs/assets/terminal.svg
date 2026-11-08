@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" width="1000" height="600" role="img" aria-labelledby="t d">
+  <title id="t">flotilla in a terminal</title>
+  <desc id="d">Captured output: flotilla doctor, a 64-sandbox swarm run on the bwrap backend, and the reference check of the example code tasks.</desc>
+  <style>
+    text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace; font-size: 14px; fill: #cbd5e1; white-space: pre; }
+    .p { fill: #5eead4; }
+    .c { fill: #f1f5f9; }
+    .dim { fill: #64748b; }
+    .ok { fill: #4ade80; }
+    .bad { fill: #f87171; }
+    .y { fill: #facc15; }
+    .k { fill: #93c5fd; }
+  </style>
+  <rect width="1000" height="600" rx="14" fill="#0b1220"/>
+  <rect width="1000" height="40" rx="14" fill="#152033"/>
+  <rect y="26" width="1000" height="14" fill="#152033"/>
+  <circle cx="24" cy="20" r="6.5" fill="#f87171"/>
+  <circle cx="46" cy="20" r="6.5" fill="#facc15"/>
+  <circle cx="68" cy="20" r="6.5" fill="#4ade80"/>
+  <text x="500" y="25" text-anchor="middle" class="dim" font-size="13">~/flotilla</text>
+
+  <text x="24" y="74"><tspan class="p">$ </tspan><tspan class="c">flotilla doctor</tspan></text>
+  <text x="24" y="96">bwrap      <tspan class="ok">ok</tspan>  /usr/bin/bwrap</text>
+  <text x="24" y="118">docker     <tspan class="dim">--  docker not installed</tspan></text>
+  <text x="24" y="140">podman     <tspan class="dim">--  podman not installed</tspan></text>
+  <text x="24" y="162">apptainer  <tspan class="dim">--  apptainer/singularity not installed</tspan></text>
+  <text x="24" y="184">local      <tspan class="ok">ok</tspan></text>
+
+  <text x="24" y="220"><tspan class="p">$ </tspan><tspan class="c">flotilla run -n 64 --size 1x1 --timeout 30s \</tspan></text>
+  <text x="24" y="242"><tspan class="c">    -c 'python3 -c "import random,time; time.sleep(random.random()/2)"; test $FLOTILLA_SWARM_INDEX -ne 17'</tspan></text>
+  <text x="24" y="264" class="dim">swarm-fe79a63b78c245fe  done 64/64  <tspan class="ok">ok 63</tspan>  <tspan class="bad">failed 1</tspan>  running 0  queued 0</text>
+  <text x="24" y="286">{ <tspan class="k">"status"</tspan>: "completed", <tspan class="k">"backend"</tspan>: "bwrap", <tspan class="k">"count"</tspan>: 64, <tspan class="k">"concurrency"</tspan>: 10,</text>
+  <text x="24" y="308">  <tspan class="k">"counts"</tspan>: { <tspan class="k">"succeeded"</tspan>: <tspan class="ok">63</tspan>, <tspan class="k">"failed"</tspan>: <tspan class="bad">1</tspan>, <tspan class="k">"cancelled"</tspan>: 0 },</text>
+  <text x="24" y="330">  <tspan class="k">"durationSeconds"</tspan>: <tspan class="y">3.597</tspan>, <tspan class="k">"sandboxSeconds"</tspan>: <tspan class="y">30.071</tspan>, <tspan class="dim">... }</tspan></text>
+
+  <text x="24" y="366"><tspan class="p">$ </tspan><tspan class="c">python examples/eval_code.py --references</tspan></text>
+  <text x="24" y="388">run_length_encode    solved <tspan class="ok">1/1</tspan>  mean reward 1.00</text>
+  <text x="24" y="410">is_balanced          solved <tspan class="ok">1/1</tspan>  mean reward 1.00</text>
+  <text x="24" y="432">kth_largest          solved <tspan class="ok">1/1</tspan>  mean reward 1.00</text>
+  <text x="24" y="454">merge_intervals      solved <tspan class="ok">1/1</tspan>  mean reward 1.00</text>
+  <text x="24" y="476" class="dim">...                  (6 more tasks)</text>
+  <text x="24" y="512">pass@1 = <tspan class="ok">1.000</tspan> over 10 samples</text>
+
+  <text x="24" y="548"><tspan class="p">$ </tspan><tspan class="c">python -m pytest -q</tspan></text>
+  <text x="24" y="570"><tspan class="ok">45 passed</tspan> in 22.30s</text>
+</svg>

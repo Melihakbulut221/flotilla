@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 560" width="1200" height="560" role="img" aria-labelledby="t d">
+  <title id="t">flotilla architecture</title>
+  <desc id="d">A trainer sends completions to flotilla, which runs each in a fresh sandbox under a concurrency cap and returns exit codes, output tails and result files as rewards.</desc>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#5eead4"/>
+    </marker>
+    <marker id="ahm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#93c5fd"/>
+    </marker>
+    <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
+      <path d="M28 0H0V28" fill="none" stroke="#ffffff" stroke-opacity="0.03"/>
+    </pattern>
+  </defs>
+  <style>
+    .sans { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Ubuntu Sans', Helvetica, Arial, sans-serif; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace; }
+    .h { font-size: 20px; font-weight: 700; fill: #f1f5f9; }
+    .s { font-size: 14px; fill: #9fb6cc; }
+    .m { font-size: 13px; fill: #cbd5e1; }
+    .lbl { font-size: 13px; fill: #5eead4; }
+    .lblb { font-size: 13px; fill: #93c5fd; }
+    .card { fill: #0f2a42; stroke: #24557a; stroke-width: 1.5; }
+    .row { fill: #0b2033; stroke: #1c4566; }
+  </style>
+
+  <rect width="1200" height="560" rx="20" fill="#08182b"/>
+  <rect width="1200" height="560" rx="20" fill="url(#grid)"/>
+
+  <!-- trainer -->
+  <g class="sans">
+    <rect class="card" x="40" y="70" width="270" height="400" rx="14"/>
+    <text class="h" x="64" y="108">Trainer</text>
+    <text class="s" x="64" y="132">GPU box, any framework</text>
+    <rect class="row" x="64" y="158" width="222" height="56" rx="9"/>
+    <text class="m mono" x="80" y="182">policy(messages)</text>
+    <text class="s" x="80" y="202">vLLM / OpenAI-compatible</text>
+    <rect class="row" x="64" y="228" width="222" height="56" rx="9"/>
+    <text class="m mono" x="80" y="252">GRPOTrainer</text>
+    <text class="s" x="80" y="272">trl_reward_func(verifier)</text>
+    <rect class="row" x="64" y="298" width="222" height="56" rx="9"/>
+    <text class="m mono" x="80" y="322">run_episodes(...)</text>
+    <text class="s" x="80" y="342">multi-turn rollouts</text>
+    <rect class="row" x="64" y="368" width="222" height="76" rx="9"/>
+    <text class="m mono" x="80" y="392">group_advantages</text>
+    <text class="s" x="80" y="412">(r - mean) / std</text>
+    <text class="s" x="80" y="432">per task group</text>
+  </g>
+
+  <!-- arrows trainer <-> flotilla -->
+  <g class="mono">
+    <path d="M318 200H446" stroke="#5eead4" stroke-width="2.5" fill="none" marker-end="url(#ah)"/>
+    <text class="lbl" x="326" y="188">completions</text>
+    <path d="M446 340H318" stroke="#93c5fd" stroke-width="2.5" fill="none" marker-end="url(#ahm)"/>
+    <text class="lblb" x="342" y="364">rewards</text>
+    <text class="s sans" x="326" y="268">in-process</text>
+    <text class="s sans" x="326" y="288">or HTTP</text>
+  </g>
+
+  <!-- flotilla core -->
+  <g class="sans">
+    <rect x="456" y="70" width="300" height="400" rx="14" fill="#0d3340" stroke="#2dd4bf" stroke-width="1.5"/>
+    <text class="h" x="480" y="108">flotilla</text>
+    <text class="s" x="480" y="132">stdlib only, one process</text>
+    <rect class="row" x="480" y="158" width="252" height="56" rx="9"/>
+    <text class="m mono" x="496" y="182">CodeVerifier</text>
+    <text class="s" x="496" y="202">io tests, judge outside sandbox code</text>
+    <rect class="row" x="480" y="228" width="252" height="56" rx="9"/>
+    <text class="m mono" x="496" y="252">SwarmRunner</text>
+    <text class="s" x="496" y="272">queue, concurrency cap, cancel</text>
+    <rect class="row" x="480" y="298" width="252" height="56" rx="9"/>
+    <text class="m mono" x="496" y="322">SessionManager</text>
+    <text class="s" x="496" y="342">persistent sandboxes, idle reaper</text>
+    <rect class="row" x="480" y="368" width="252" height="76" rx="9"/>
+    <text class="m mono" x="496" y="392">runs/&lt;id&gt;/results.jsonl</text>
+    <text class="s" x="496" y="412">exit code, 16 KB tails,</text>
+    <text class="s" x="496" y="432">64 KB result file</text>
+  </g>
+
+  <!-- arrows flotilla -> sandboxes -->
+  <path d="M764 200H842" stroke="#5eead4" stroke-width="2.5" fill="none" marker-end="url(#ah)"/>
+  <path d="M842 340H764" stroke="#93c5fd" stroke-width="2.5" fill="none" marker-end="url(#ahm)"/>
+
+  <!-- sandboxes -->
+  <g class="sans">
+    <rect class="card" x="852" y="70" width="308" height="400" rx="14"/>
+    <text class="h" x="876" y="108">Sandboxes</text>
+    <text class="s" x="876" y="132">fresh per job, destroyed after</text>
+  </g>
+  <g class="mono" font-size="12">
+    <!-- 4 x 5 grid -->
+    <g fill="#0b2033" stroke="#1c4566">
+      <rect x="876" y="156" width="60" height="44" rx="7"/><rect x="942" y="156" width="60" height="44" rx="7"/><rect x="1008" y="156" width="60" height="44" rx="7"/><rect x="1074" y="156" width="60" height="44" rx="7"/>
+      <rect x="876" y="208" width="60" height="44" rx="7"/><rect x="942" y="208" width="60" height="44" rx="7"/><rect x="1008" y="208" width="60" height="44" rx="7"/><rect x="1074" y="208" width="60" height="44" rx="7"/>
+      <rect x="876" y="260" width="60" height="44" rx="7"/><rect x="942" y="260" width="60" height="44" rx="7"/><rect x="1008" y="260" width="60" height="44" rx="7"/><rect x="1074" y="260" width="60" height="44" rx="7"/>
+      <rect x="876" y="312" width="60" height="44" rx="7"/><rect x="942" y="312" width="60" height="44" rx="7"/><rect x="1008" y="312" width="60" height="44" rx="7"/><rect x="1074" y="312" width="60" height="44" rx="7"/>
+    </g>
+    <g fill="#64748b">
+      <text x="888" y="183">sbx-0</text><text x="954" y="183">sbx-1</text><text x="1020" y="183">sbx-2</text><text x="1086" y="183">sbx-3</text>
+      <text x="888" y="235">sbx-4</text><text x="954" y="235">sbx-5</text><text x="1020" y="235">sbx-6</text><text x="1086" y="235">sbx-7</text>
+      <text x="888" y="287">sbx-8</text><text x="954" y="287">sbx-9</text><text x="1016" y="287">sbx-10</text><text x="1082" y="287">sbx-11</text>
+      <text x="884" y="339">sbx-12</text><text x="950" y="339">sbx-13</text><text x="1016" y="339">sbx-14</text><text x="1082" y="339">sbx-15</text>
+    </g>
+    <g>
+      <circle cx="928" cy="165" r="4" fill="#4ade80"/><circle cx="994" cy="165" r="4" fill="#4ade80"/><circle cx="1060" cy="165" r="4" fill="#f87171"/><circle cx="1126" cy="165" r="4" fill="#4ade80"/>
+      <circle cx="928" cy="217" r="4" fill="#4ade80"/><circle cx="994" cy="217" r="4" fill="#facc15"/><circle cx="1060" cy="217" r="4" fill="#facc15"/><circle cx="1126" cy="217" r="4" fill="#4ade80"/>
+      <circle cx="928" cy="269" r="4" fill="#facc15"/><circle cx="994" cy="269" r="4" fill="#facc15"/><circle cx="1060" cy="269" r="4" fill="#475569"/><circle cx="1126" cy="269" r="4" fill="#475569"/>
+      <circle cx="928" cy="321" r="4" fill="#475569"/><circle cx="994" cy="321" r="4" fill="#475569"/><circle cx="1060" cy="321" r="4" fill="#475569"/><circle cx="1126" cy="321" r="4" fill="#475569"/>
+    </g>
+  </g>
+  <g class="sans" font-size="13" fill="#9fb6cc">
+    <circle cx="882" cy="386" r="4" fill="#4ade80"/><text x="892" y="391">succeeded</text>
+    <circle cx="978" cy="386" r="4" fill="#facc15"/><text x="988" y="391">running</text>
+    <circle cx="1058" cy="386" r="4" fill="#f87171"/><text x="1068" y="391">failed</text>
+    <circle cx="882" cy="412" r="4" fill="#475569"/><text x="892" y="417">queued (waiting for a slot)</text>
+    <text class="mono" x="876" y="448" font-size="12" fill="#5eead4">bwrap · podman · docker · apptainer</text>
+  </g>
+
+  <!-- footer -->
+  <g class="sans">
+    <text x="40" y="518" font-size="15" fill="#9fb6cc">Each sandbox:  no network by default  ·  host home and env hidden  ·  system dirs read-only  ·  background processes die with it</text>
+  </g>
+</svg>
