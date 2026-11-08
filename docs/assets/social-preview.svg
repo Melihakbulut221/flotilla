@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#06142a"/>
+      <stop offset="1" stop-color="#0d2f4a"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.28" cy="0.45" r="0.45">
+      <stop offset="0" stop-color="#2dd4bf" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#2dd4bf" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="lead" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5eead4"/>
+      <stop offset="1" stop-color="#14b8a6"/>
+    </linearGradient>
+    <linearGradient id="line" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2dd4bf" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#2dd4bf" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#2dd4bf" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#ffffff" stroke-opacity="0.035"/>
+    </pattern>
+  </defs>
+
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <rect width="1280" height="640" fill="url(#grid)"/>
+  <rect width="1280" height="640" fill="url(#glow)"/>
+
+  <!-- fleet, scaled up from the banner -->
+  <g transform="translate(150 150) scale(1.45)">
+    <g fill="#1e4a6b" stroke="#2f6b92" stroke-width="1.5">
+      <rect x="0"   y="96"  width="46" height="30" rx="7"/>
+      <rect x="56"  y="64"  width="46" height="30" rx="7"/>
+      <rect x="56"  y="128" width="46" height="30" rx="7"/>
+      <rect x="112" y="32"  width="46" height="30" rx="7"/>
+      <rect x="112" y="96"  width="46" height="30" rx="7"/>
+      <rect x="112" y="160" width="46" height="30" rx="7"/>
+      <rect x="168" y="64"  width="46" height="30" rx="7"/>
+      <rect x="168" y="128" width="46" height="30" rx="7"/>
+    </g>
+    <rect x="224" y="96" width="46" height="30" rx="7" fill="url(#lead)"/>
+    <circle cx="12"  cy="111" r="4" fill="#4ade80"/>
+    <circle cx="68"  cy="79"  r="4" fill="#4ade80"/>
+    <circle cx="68"  cy="143" r="4" fill="#4ade80"/>
+    <circle cx="124" cy="47"  r="4" fill="#4ade80"/>
+    <circle cx="124" cy="111" r="4" fill="#facc15"/>
+    <circle cx="124" cy="175" r="4" fill="#4ade80"/>
+    <circle cx="180" cy="79"  r="4" fill="#4ade80"/>
+    <circle cx="180" cy="143" r="4" fill="#f87171"/>
+    <circle cx="236" cy="111" r="4" fill="#06142a"/>
+    <g stroke="#2dd4bf" stroke-opacity="0.5" stroke-width="2" stroke-linecap="round">
+      <path d="M-30 111h18"/><path d="M26 79h18"/><path d="M26 143h18"/>
+      <path d="M82 47h18"/><path d="M138 79h18"/><path d="M138 143h18"/>
+    </g>
+  </g>
+
+  <g font-family="'Ubuntu Sans', 'Segoe UI', 'DejaVu Sans', Helvetica, Arial, sans-serif">
+    <text x="600" y="282" font-size="118" font-weight="700" fill="#f1f5f9" letter-spacing="-3">flotilla</text>
+    <text x="606" y="336" font-size="29" fill="#a8bfd4">Self-hosted sandbox swarms and</text>
+    <text x="606" y="374" font-size="29" fill="#a8bfd4">RL environments for LLM training</text>
+  </g>
+
+  <g font-family="'DejaVu Sans Mono', ui-monospace, Menlo, Consolas, monospace" font-size="17" fill="#5eead4">
+    <rect x="606" y="404" width="196" height="36" rx="18" fill="#0f3b4f" stroke="#1f6f79"/>
+    <text x="704" y="428" text-anchor="middle">zero dependencies</text>
+    <rect x="814" y="404" width="206" height="36" rx="18" fill="#0f3b4f" stroke="#1f6f79"/>
+    <text x="917" y="428" text-anchor="middle">rootless isolation</text>
+    <rect x="606" y="452" width="254" height="36" rx="18" fill="#0f3b4f" stroke="#1f6f79"/>
+    <text x="733" y="476" text-anchor="middle">hack-resistant rewards</text>
+    <rect x="872" y="452" width="148" height="36" rx="18" fill="#0f3b4f" stroke="#1f6f79"/>
+    <text x="946" y="476" text-anchor="middle">GRPO-ready</text>
+  </g>
+
+  <rect x="0" y="560" width="1280" height="2" fill="url(#line)"/>
+  <g font-family="'DejaVu Sans Mono', ui-monospace, Menlo, Consolas, monospace" font-size="20">
+    <text x="640" y="604" text-anchor="middle" fill="#7f97ad">github.com/Melihakbulut221/flotilla</text>
+  </g>
+</svg>
