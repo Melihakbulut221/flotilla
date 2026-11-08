@@ -229,6 +229,62 @@ The dataset needs `tests` and `entry_point` columns.
 script, and [`examples/eval_code.py`](examples/eval_code.py) scores any
 OpenAI-compatible endpoint on the example task set.
 
+### Music with a prompt-adherence reward
+
+```python
+from flotilla.rl import MusicReward, make_music_tasks, trl_music_reward
+
+tasks = make_music_tasks(2000, seed=1)   # "Compose a jig in D minor, 6/8 time, at dotted quarter = 80, 16 bars ..."
+rewards = MusicReward().rewards(completions, tasks)
+trainer = GRPOTrainer(..., reward_funcs=[trl_music_reward(MusicReward())])
+```
+
+The policy writes ABC notation. The reward is
+`validity x adherence x (0.4 + 0.6 x musicality)`.
+
+**Adherence** checks each constraint the prompt states: key, meter,
+tempo, number of bars and number of voices. A header claim only counts if
+the music backs it:
+
+- `K:Dm` earns nothing for the key unless the notes fit D minor;
+- `M:6/8` earns nothing for the meter unless the bars have that length.
+
+**Musicality** is a set of corpus-free heuristics:
+
+- scale fit;
+- steps against leaps;
+- range;
+- rhythmic variety;
+- motifs that repeat without looping;
+- an ending on the tonic.
+
+Their mean is scaled by a degeneracy gate (the worst of repeats, range,
+motifs and scale fit). A drone or a loop therefore cannot score well by
+collecting the easy points.
+
+| Completion | Adherence | Reward |
+|---|:-:|:-:|
+| a jig that follows the prompt | 1.00 | 1.00 |
+| one note held for every bar, correct header | 1.00 | 0.53 |
+| correct header over notes that are not in the key | 0.80 | 0.45 |
+| a fluent tune in the wrong key, meter and tempo | 0.30 | 0.29 |
+
+These rows are the cases in [`tests/test_music.py`](tests/test_music.py).
+Scorers that only measure similarity to human music statistics would rank
+the last row level with the first. This is the gap the adherence term
+closes.
+
+The parser is pure Python and bounded, and it runs no code, so this
+environment needs no sandbox and no `abc2midi`. `reference_piece()` writes a
+plain compliant piece for any task; `eval_music.py --references` checks that
+every task is solvable with full adherence. `to_midi()` turns a completion
+into a MIDI file to listen to.
+
+```bash
+python examples/eval_music.py --base-url http://localhost:8000/v1 --model my-model --samples 4 --midi-dir midi/
+python examples/train_grpo_trl.py --env music --model Qwen/Qwen2.5-0.5B-Instruct --max-completion-length 1024
+```
+
 ### Multi-turn tool use
 
 ```python
@@ -433,9 +489,9 @@ flotilla/session.py     persistent sandboxes for multi-turn environments
 flotilla/backends/      bwrap, docker/podman, apptainer, local
 flotilla/server.py      HTTP API (stdlib)
 flotilla/client.py      one client for in-process and remote use
-flotilla/rl/            code verifier + harness, shell and tool-calling envs, rollouts, reward shaping, TRL adapter
+flotilla/rl/            code verifier, music scorer, shell and tool-calling envs, rollouts, reward shaping, TRL adapters
 examples/               task sets, eval, GRPO training, rollout collection
-tests/                  swarm, isolation, reward-hacking, shaping, tool-calling and server tests
+tests/                  swarm, isolation, reward-hacking, shaping, tool-calling, music and server tests
 ```
 
 ## Tests

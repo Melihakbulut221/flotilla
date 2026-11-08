@@ -1,11 +1,16 @@
-"""GRPO on verifiable code rewards with TRL, rewards computed in sandboxes.
+"""GRPO with TRL on verifiable rewards: code (sandboxed tests) or music (ABC).
 
 Needs a GPU and ``pip install trl datasets transformers accelerate``.
-Every generated completion is executed against the task's tests in its own
-sandbox; the pass fraction is the reward. Nothing here is specific to the
-model; pass any causal LM checkpoint with --model.
+Nothing here is specific to the model; pass any causal LM checkpoint.
+
+- ``--env code``: every completion runs against the task's tests in its own
+  sandbox, and the pass fraction is the reward.
+- ``--env music``: every completion is ABC notation, scored for adherence
+  to the prompt's key, meter, tempo, bars and voices, and for basic
+  musicality. It runs no code and needs no sandbox.
 
     python examples/train_grpo_trl.py --model Qwen/Qwen2.5-0.5B-Instruct --steps 200
+    python examples/train_grpo_trl.py --env music --model Qwen/Qwen2.5-0.5B-Instruct --max-completion-length 1024
 
 Run the sandboxes on another machine with ``flotilla serve`` there and
 ``--flotilla-url http://host:8642`` (plus FLOTILLA_TOKEN) here.
@@ -19,19 +24,21 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from flotilla import Flotilla  # noqa: E402
-from flotilla.rl import CodeVerifier, trl_reward_func  # noqa: E402
+from flotilla.rl import CodeVerifier, MusicReward, make_music_tasks, trl_music_reward, trl_reward_func  # noqa: E402
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True)
-    ap.add_argument("--tasks", default=str(Path(__file__).parent / "tasks" / "code_tasks.jsonl"))
+    ap.add_argument("--env", choices=["code", "music"], default="code")
+    ap.add_argument("--tasks", help="JSON Lines task file (default: the example set for --env)")
+    ap.add_argument("--music-tasks", type=int, default=2000, help="--env music without --tasks: generate N")
     ap.add_argument("--steps", type=int, default=200)
     ap.add_argument("--num-generations", type=int, default=8)
     ap.add_argument("--batch-size", type=int, default=8)
     ap.add_argument("--lr", type=float, default=1e-6)
     ap.add_argument("--max-completion-length", type=int, default=512)
-    ap.add_argument("--output-dir", default="runs/grpo-code")
+    ap.add_argument("--output-dir", help="default: runs/grpo-<env>")
     ap.add_argument("--flotilla-url")
     ap.add_argument("--use-vllm", action="store_true")
     args = ap.parse_args()
@@ -39,24 +46,34 @@ def main():
     from datasets import Dataset
     from trl import GRPOConfig, GRPOTrainer
 
-    rows = [json.loads(line) for line in open(args.tasks) if line.strip()]
-    ds = Dataset.from_list([
-        {
-            "prompt": [{"role": "user", "content": r["prompt"]}],
-            # TRL forwards extra columns to reward functions as kwargs
-            "tests": json.dumps(r["tests"]),
-            "entry_point": r["entry_point"],
-        }
-        for r in rows
-    ])
-
-    fl = Flotilla(base_url=args.flotilla_url)
-    if not fl.isolated:
-        print("warning: sandboxes are not isolated (local backend)", file=sys.stderr)
-    verifier = CodeVerifier(fl, timeout=60, per_test_timeout=5, partial_credit=True)
+    if args.env == "code":
+        path = args.tasks or str(Path(__file__).parent / "tasks" / "code_tasks.jsonl")
+        rows = [json.loads(line) for line in open(path) if line.strip()]
+        ds = Dataset.from_list([
+            {
+                "prompt": [{"role": "user", "content": r["prompt"]}],
+                # TRL forwards extra columns to reward functions as kwargs
+                "tests": json.dumps(r["tests"]),
+                "entry_point": r["entry_point"],
+            }
+            for r in rows
+        ])
+        fl = Flotilla(base_url=args.flotilla_url)
+        if not fl.isolated:
+            print("warning: sandboxes are not isolated (local backend)", file=sys.stderr)
+        verifier = CodeVerifier(fl, timeout=60, per_test_timeout=5, partial_credit=True)
+        reward_funcs = [trl_reward_func(verifier)]
+    else:
+        rows = ([json.loads(line) for line in open(args.tasks) if line.strip()] if args.tasks
+                else make_music_tasks(args.music_tasks, seed=1))
+        ds = Dataset.from_list([
+            {"prompt": [{"role": "user", "content": r["prompt"]}], "constraints": json.dumps(r["constraints"])}
+            for r in rows
+        ])
+        reward_funcs = [trl_music_reward(MusicReward())]
 
     cfg = GRPOConfig(
-        output_dir=args.output_dir,
+        output_dir=args.output_dir or f"runs/grpo-{args.env}",
         max_steps=args.steps,
         learning_rate=args.lr,
         per_device_train_batch_size=args.batch_size,
@@ -70,7 +87,7 @@ def main():
     )
     trainer = GRPOTrainer(
         model=args.model,
-        reward_funcs=[trl_reward_func(verifier)],
+        reward_funcs=reward_funcs,
         args=cfg,
         train_dataset=ds,
     )

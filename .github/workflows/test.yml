@@ -20,3 +20,4 @@ jobs:
       - run: flotilla doctor || true
       - run: python -m pytest -q
       - run: python examples/eval_code.py --references
+      - run: python examples/eval_music.py --references

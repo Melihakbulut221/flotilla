@@ -6,9 +6,11 @@ reference scores 1.0, which is the sanity gate for a task set.
 """
 
 import json
+import sys
 from pathlib import Path
 
 HERE = Path(__file__).parent
+sys.path.insert(0, str(HERE.parents[1]))
 
 CODE = [
     ("run_length_encode",
@@ -117,4 +119,10 @@ if __name__ == "__main__":
     with open(HERE / "shell_tasks.jsonl", "w") as f:
         for r in SHELL:
             f.write(json.dumps(r) + "\n")
-    print("wrote", len(CODE), "code tasks and", len(SHELL), "shell tasks")
+    from flotilla.rl.music import make_music_tasks
+
+    music = make_music_tasks(64, seed=0)
+    with open(HERE / "music_tasks.jsonl", "w") as f:
+        for r in music:
+            f.write(json.dumps(r) + "\n")
+    print("wrote", len(CODE), "code tasks,", len(SHELL), "shell tasks and", len(music), "music tasks")
