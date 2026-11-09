@@ -692,20 +692,23 @@ def make_music_tasks(n: int, seed: int = 0) -> list[dict]:
 
 
 _RHYTHMS = {8: [[2, 1, 1, 2, 2], [1, 1, 1, 1, 2, 2], [2, 2, 1, 1, 2]], 6: [[2, 1, 2, 1], [3, 1, 1, 1], [1, 1, 1, 3]],
-            4: [[1, 1, 2], [2, 1, 1], [2, 2]]}
+            4: [[1, 1, 2], [2, 1, 1], [2, 2]], 7: [[2, 2, 3], [3, 2, 2], [2, 1, 1, 3]]}
 
 
 def reference_piece(c: dict, seed: int = 0) -> str:
     """A plain piece that satisfies ``c`` exactly: a diatonic random walk in
-    the requested key and meter, ending on the tonic, with a bass voice when
-    two voices are asked for. Used to check that every task is solvable and
-    that the scorer gives full adherence to a compliant piece."""
+    the requested key and meter, ending on the tonic, plus held lower voices
+    (bass on tonic/dominant, inner voices on chord tones) when more voices
+    are asked for. Used to check that every task is solvable and that the
+    scorer gives full adherence to a compliant piece."""
     rng = random.Random(seed)
-    key = parse_key(c["key"])
-    num, den = (int(x) for x in c["meter"].split("/"))
+    key = parse_key(c.get("key", "C"))
+    meter = c.get("meter", "4/4")
+    num, den = (int(x) for x in meter.split("/"))
     eighths = int(Fr(num, den) / Fr(1, 8))
     rhythms = _RHYTHMS.get(eighths, [[1] * eighths])
     start = _LETTERS.index(key.tonic[0])
+    n_bars, n_voices = int(c.get("bars", 8)), max(1, int(c.get("voices", 1)))
 
     def token(a: int, n: int) -> str:
         letter, octave = _LETTERS[a % 7], a // 7
@@ -713,10 +716,9 @@ def reference_piece(c: dict, seed: int = 0) -> str:
         t += "," * max(0, -octave) + "'" * max(0, octave - 1)
         return t + ("" if n == 1 else str(n))
 
-    a, lines = start, []
-    melody = []
-    for bar in range(int(c["bars"])):
-        if bar == int(c["bars"]) - 1:
+    a, melody = start, []
+    for bar in range(n_bars):
+        if bar == n_bars - 1:
             melody.append(token(start + 7 if a > start + 3 else start, eighths))
             break
         notes = []
@@ -724,16 +726,28 @@ def reference_piece(c: dict, seed: int = 0) -> str:
             a = max(start - 2, min(start + 9, a + rng.choice([-2, -1, -1, 1, 1, 2, 0, 3])))
             notes.append(token(a, n))
         melody.append("".join(notes))
-    q = (f"Q:3/8={round(float(c['tempo']) / 1.5)}" if c["meter"] == "6/8"
-         else f"Q:1/4={round(float(c['tempo']))}")
-    head = [f"X:{seed + 1}", "T:Reference", f"M:{c['meter']}", "L:1/8", q, f"K:{c['key']}"]
-    if int(c.get("voices", 1)) == 1:
+    if "tempo" not in c:
+        q = "Q:1/4=100"
+    elif meter == "6/8":
+        q = f"Q:3/8={round(float(c['tempo']) / 1.5)}"
+    else:
+        q = f"Q:1/4={round(float(c['tempo']))}"
+    head = [f"X:{seed + 1}", "T:Reference", f"M:{meter}", "L:1/8", q, f"K:{c.get('key', 'C')}"]
+    if n_voices == 1:
         return "\n".join(head + ["|".join(melody) + "|]"])
-    bass = []
-    for bar in range(int(c["bars"])):
-        deg = 0 if bar % 4 in (0, 3) or bar == int(c["bars"]) - 1 else 4
-        bass.append(token(start - 7 + deg, eighths))
-    body = ["V:1", "|".join(melody) + "|]", "V:2", "|".join(bass) + "|]"]
+    body = ["V:1", "|".join(melody) + "|]"]
+    for v in range(2, n_voices + 1):
+        if v == n_voices:            # bass: tonic and dominant, an octave down
+            degs, base = (0, 4), start - 7
+        else:                         # inner voices: third or fifth, stacked downwards
+            degs, base = ((2, 4) if v % 2 else (4, 2)), start - 7 * ((v - 1) // 2)
+        line = []
+        for bar in range(n_bars):
+            deg = 0 if bar == n_bars - 1 or bar % 4 in (0, 3) else degs[1]
+            if v != n_voices and bar != n_bars - 1:
+                deg = degs[0] if bar % 2 else degs[1]
+            line.append(token(base + deg, eighths))
+        body += [f"V:{v}", "|".join(line) + "|]"]
     return "\n".join(head + body)
 
 

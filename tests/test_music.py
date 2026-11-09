@@ -194,3 +194,13 @@ def test_midi_output():
     data = to_midi(p)
     assert data[:4] == b"MThd" and data.count(b"MTrk") == 3        # tempo track + 2 voices
     assert int.from_bytes(data[10:12], "big") == 3
+
+
+@pytest.mark.parametrize("c", [
+    {"key": "F#m", "meter": "7/8", "tempo": 150, "bars": 24, "voices": 4},
+    {"key": "Ab", "meter": "4/4", "bars": 40, "voices": 6},              # no tempo constraint
+    {"key": "E", "meter": "6/8", "bars": 12, "voices": 3},
+])
+def test_reference_pieces_cover_the_mimo_distribution(c):
+    s = score_abc(f"```abc\n{reference_piece(c)}\n```", c)
+    assert s.adherence["score"] == 1.0, s.adherence
