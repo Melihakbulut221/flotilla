@@ -234,6 +234,7 @@ class Piece:
     tempo_qpm: float | None = None
     voices: dict = field(default_factory=dict)      # id -> list[Note]
     bars: dict = field(default_factory=dict)        # id -> list[Fr] (bar durations)
+    chords: list = field(default_factory=list)      # (voice, time, symbol) from "..." chord names
     unknown_chars: int = 0
     body_chars: int = 0
     errors: list = field(default_factory=list)
@@ -251,6 +252,8 @@ _FIELD_LINE = re.compile(r"^([A-Za-z]):(.*)$")
 _DECORATION_LETTERS = set("~.HLMOPSTuvy")
 _NOTE_RUN_OK = set("ABCDEFGabcdefgzxZ") | _DECORATION_LETTERS
 _WORD = re.compile(r"[A-Za-z]{2,}")
+_CHORD_SYMBOL = re.compile(r"^\s*\(?\s*[A-G][#b]?(?:m|maj|min|dim|aug|sus|add|d|a|M|[0-9]|b9|#9|\+)*"
+                           r"(?:\s*/\s*[A-Ga-g][#b+-]?)?\s*\)?\s*$")
 
 
 def _length(num: str, slashes: str, den: str) -> Fr:
@@ -375,6 +378,8 @@ def parse_abc(src: str) -> Piece:
                 i += 1
             elif c == '"':
                 j = line.find('"', i + 1)
+                if j != -1 and _CHORD_SYMBOL.match(line[i + 1:j]):
+                    p.chords.append((cur[0], v.time, line[i + 1:j].strip()))
                 i = n if j == -1 else j + 1
             elif c in "!+" and line.find(c, i + 1) != -1 and line.find(c, i + 1) - i < 40:
                 i = line.find(c, i + 1) + 1
@@ -518,6 +523,30 @@ def _band(x: float, lo0: float, lo1: float, hi1: float, hi0: float) -> float:
     return 1.0
 
 
+def bar_stats(bars: list, meter: Fr) -> tuple[int, int, int]:
+    """(full bars, interior bars that fit, interior bars).
+
+    Two neighbouring partial bars that add up to one bar count as one full
+    bar. This is how folk tunes are written: each section after a repeat
+    sign starts with a pickup, which completes the bar the sign cut short.
+    The first and last bars may be partial (anacrusis, final bar), so they
+    are not checked.
+    """
+    n = len(bars)
+    ok = [b == meter for b in bars]
+    full = sum(ok)
+    i = 0
+    while i < n - 1:
+        if not ok[i] and not ok[i + 1] and bars[i] + bars[i + 1] == meter:
+            ok[i] = ok[i + 1] = True
+            full += 1
+            i += 2
+        else:
+            i += 1
+    inner = range(1, n - 1) if n > 2 else range(n)
+    return full, sum(ok[k] for k in inner), len(inner)
+
+
 def features(p: Piece, key: Key | None = None) -> dict:
     """Numbers the reward is built from. ``key`` defaults to the declared key."""
     key = key or p.key
@@ -530,10 +559,10 @@ def features(p: Piece, key: Key | None = None) -> dict:
     full_bars, interior_ok, interior = 0, 0, 0
     for bars in p.bars.values():
         if p.meter:
-            full_bars = max(full_bars, sum(1 for b in bars if b == p.meter))
-            inner = bars[1:-1] if len(bars) > 2 else bars
-            interior += len(inner)
-            interior_ok += sum(1 for b in inner if b == p.meter)
+            full, ok, total = bar_stats(bars, p.meter)
+            full_bars = max(full_bars, full)
+            interior_ok += ok
+            interior += total
     return {
         "notes": len(pitched),
         "voices": len(p.voices),

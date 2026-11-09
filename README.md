@@ -286,6 +286,26 @@ python examples/eval_music.py --base-url http://localhost:8000/v1 --model my-mod
 python examples/train_grpo_trl.py --env music --model Qwen/Qwen2.5-0.5B-Instruct --max-completion-length 1024
 ```
 
+#### Warm-up before RL
+
+A 1.5B instruct model writes no valid ABC for MiMo-style prompts: reward
+0.000 on 200 rows. With a format prompt it reaches 0.016, and meter and bar
+adherence stay at 0. GRPO from that start has almost no signal.
+
+`flotilla.rl.music_sft` builds a supervised set from the Nottingham folk-tune
+collection: 6060 examples, English and Chinese prompts, 30 keys, one to six
+voices. Every example is checked to get full adherence from the RL reward.
+`examples/sft_music.py` trains a LoRA on it.
+
+```bash
+python examples/build_music_sft.py --download && python examples/build_music_sft.py
+python examples/sft_music.py --model Qwen/Qwen2.5-1.5B-Instruct
+```
+
+See [docs/music_sft.md](docs/music_sft.md) for the build, the statistics and
+the licenses. The generated data stays out of this repository: the
+Nottingham part is GPL-3.0.
+
 ### Multi-turn tool use
 
 ```python
@@ -568,7 +588,7 @@ flotilla/backends/      bwrap, docker/podman, apptainer, local
 flotilla/server.py      HTTP API (stdlib)
 flotilla/client.py      one client for in-process and remote use
 flotilla/verl.py        verl row export/import, MiMo import, verl reward functions
-flotilla/rl/            code verifier, music scorer, shell and tool-calling envs, rollouts, reward shaping, TRL adapters
+flotilla/rl/            code verifier, music scorer and SFT builder, shell and tool-calling envs, rollouts, reward shaping, TRL adapters
 examples/               task sets, eval, GRPO training, rollout collection
 tests/                  swarm, isolation, reward-hacking, shaping, tool-calling, music, verl and server tests
 ```

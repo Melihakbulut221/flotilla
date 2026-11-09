@@ -8,3 +8,4 @@ runs/
 rollouts.jsonl
 .venv/
 .claude/
+data/

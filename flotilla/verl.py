@@ -118,7 +118,7 @@ def mimo_image(name: str, repo: str = MIMO_IMAGE_REPO, apptainer: bool = False) 
 _ZH_KEY = re.compile(r"(升|降)?\s*([A-G])\s*([#b♯♭])?\s*(大调|小调)")
 _EN_KEY = re.compile(r"\b([A-G])(?:\s*(#|b|♯|♭|-flat|-sharp| flat| sharp))?\s+"
                      r"(major|minor|dorian|mixolydian|lydian|phrygian|locrian|aeolian|ionian)\b", re.I)
-_BARS = re.compile(r"(\d+)\s*(?:小节|bars?\b|measures?\b)", re.I)
+_BARS = re.compile(r"(\d+)\s*-?\s*(?:小节|bars?\b|measures?\b)", re.I)
 
 
 def _acc(sym: str | None) -> str:

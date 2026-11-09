@@ -74,6 +74,7 @@ def test_read_datasets_server_dump(tmp_path):
     ("A reel in F-sharp minor, 32 bars long", {"key": "F#m", "bars": 32}),
     ("A tune in D dorian over 24 measures", {"key": "D dorian", "bars": 24}),
     ("A piece in Bb major", {"key": "Bb"}),
+    ("Write a 32-bar jig in G major (6/8)", {"key": "G", "bars": 32}),
 ])
 def test_music_constraints_from_prompt(text, want):
     assert verl.music_constraints_from_prompt(text) == want
