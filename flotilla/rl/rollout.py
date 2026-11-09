@@ -23,8 +23,8 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Iterable
 
-from .env import SYSTEM_PROMPT, ShellTaskEnv
-from .tools import TOOL_SYSTEM_PROMPT, TOOLS, ToolTaskEnv, render_tools_prompt
+from .env import ShellTaskEnv
+from .tools import TOOLS, ToolTaskEnv, render_tools_prompt
 from .shaping import assistant_text, group_advantages, is_degenerate  # noqa: F401  (re-export)
 
 Policy = Callable[[list[dict]], "str | dict"]
@@ -97,7 +97,7 @@ def run_episode(env: ShellTaskEnv, policy: Policy, system_prompt: str | None = N
     """
     tool_env = isinstance(env, ToolTaskEnv)
     if system_prompt is None:
-        system_prompt = TOOL_SYSTEM_PROMPT if tool_env else SYSTEM_PROMPT
+        system_prompt = env.system_prompt
         if tool_env and not native_tools:
             system_prompt += "\n\n" + render_tools_prompt(env.tools)
     t0 = time.time()

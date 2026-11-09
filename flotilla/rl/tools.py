@@ -2,7 +2,8 @@
 
 Tools: ``bash``, ``read``, ``write``, ``edit``, ``grep``, ``glob`` and
 ``submit``, declared as OpenAI ``tools`` JSON schemas (``TOOLS``). Relative
-paths resolve against ``/work``.
+paths and commands start from the task's working directory (``/work``
+unless the task sets ``workdir``).
 
 Each assistant message is one turn. Its tool calls run in order and every
 call gets a ``role: tool`` reply. The episode ends, and the task is verified
@@ -52,12 +53,12 @@ def _fn(name: str, description: str, properties: dict, required: list[str]) -> d
 
 
 TOOLS = [
-    _fn("bash", "Run a shell command in the sandbox (cwd /work, no network). Returns stdout, stderr and the exit code.",
+    _fn("bash", "Run a shell command in the sandbox, from the working directory, without network. Returns stdout, stderr and the exit code.",
         {"command": {"type": "string", "description": "The command to run."},
          "timeout": {"type": "integer", "description": "Seconds before the command is killed (default 30, max 300)."}},
         ["command"]),
     _fn("read", "Read a text file. Lines are numbered from 1.",
-        {"path": {"type": "string", "description": "File path, absolute or relative to /work."},
+        {"path": {"type": "string", "description": "File path, absolute or relative to the working directory."},
          "offset": {"type": "integer", "description": "First line to show (1-based, default 1)."},
          "limit": {"type": "integer", "description": "Maximum number of lines (default 500)."}},
         ["path"]),
@@ -70,16 +71,16 @@ TOOLS = [
         ["path", "old_string", "new_string"]),
     _fn("grep", "Search file contents with an extended regular expression. Returns path:line:text matches.",
         {"pattern": {"type": "string"},
-         "path": {"type": "string", "description": "File or directory to search (default /work)."},
+         "path": {"type": "string", "description": "File or directory to search (default: the working directory)."},
          "glob": {"type": "string", "description": "Only search files whose name matches, e.g. *.py."},
          "ignore_case": {"type": "boolean"},
          "max_results": {"type": "integer", "description": "Default 250."}},
         ["pattern"]),
     _fn("glob", "List files matching a glob pattern such as **/*.py, relative to path.",
         {"pattern": {"type": "string"},
-         "path": {"type": "string", "description": "Directory to search (default /work)."}},
+         "path": {"type": "string", "description": "Directory to search (default: the working directory)."}},
         ["pattern"]),
-    _fn("submit", "Finish the task. Call this once the work in /work is complete.",
+    _fn("submit", "Finish the task. Call this once the work is complete.",
         {"summary": {"type": "string", "description": "One or two sentences on what was done."}},
         []),
 ]
@@ -175,11 +176,11 @@ def middle_truncate(text: str, limit: int) -> str:
     return f"{head}\n... [{len(text) - len(head) - len(tail)} characters truncated] ...\n{tail}"
 
 
-def _resolve(path: Any) -> str:
+def _resolve(path: Any, base: str = WORKDIR) -> str:
     if not isinstance(path, str) or not path.strip():
         raise ToolError("path must be a non-empty string")
     p = path.strip()
-    p = posixpath.normpath(p if p.startswith("/") else posixpath.join(WORKDIR, p))
+    p = posixpath.normpath(p if p.startswith("/") else posixpath.join(base, p))
     if p == "/":
         raise ToolError("path must not be /")
     return p
@@ -240,6 +241,13 @@ class ToolTaskEnv(ShellTaskEnv):
         self.tool_errors = 0
 
     tools = TOOLS
+
+    @property
+    def system_prompt(self) -> str:
+        return TOOL_SYSTEM_PROMPT.replace("/work", self.workdir)
+
+    def _path(self, path: Any) -> str:
+        return _resolve(path, self.workdir)
 
     def reset(self) -> str:
         self.tool_calls = self.tool_errors = 0
@@ -324,7 +332,7 @@ class ToolTaskEnv(ShellTaskEnv):
         except (TypeError, ValueError):
             raise ToolError("timeout must be a number") from None
         t = max(1.0, min(t, self.bash_max_timeout))
-        r = self.session.exec(command, timeout=t, output_limit=self.max_observation_chars * 2)
+        r = self.session.exec(self.in_workdir(command), timeout=t, output_limit=self.max_observation_chars * 2)
         body = r.stdout
         if r.stderr:
             body += ("\n" if body and not body.endswith("\n") else "") + r.stderr
@@ -342,7 +350,7 @@ class ToolTaskEnv(ShellTaskEnv):
         return data.decode("utf-8", errors="replace")
 
     def tool_read(self, path: str, offset: Any = 1, limit: Any = 500) -> str:
-        p = _resolve(path)
+        p = self._path(path)
         lines = self._read_text(p).split("\n")
         if lines and lines[-1] == "":
             lines.pop()
@@ -358,14 +366,14 @@ class ToolTaskEnv(ShellTaskEnv):
         return body + (f"\n... {rest} more lines (use offset {start + len(chunk)})" if rest > 0 else "")
 
     def tool_write(self, path: str, content: Any) -> str:
-        p = _resolve(path)
+        p = self._path(path)
         if not isinstance(content, str):
             raise ToolError("content must be a string")
         self.session.write_file(p, content)
         return f"Wrote {len(content.encode())} bytes to {p}"
 
     def tool_edit(self, path: str, old_string: Any, new_string: Any, replace_all: Any = False) -> str:
-        p = _resolve(path)
+        p = self._path(path)
         if not isinstance(old_string, str) or not isinstance(new_string, str):
             raise ToolError("old_string and new_string must be strings")
         if old_string == "":
@@ -386,7 +394,7 @@ class ToolTaskEnv(ShellTaskEnv):
                   max_results: Any = 250) -> str:
         if not isinstance(pattern, str) or not pattern:
             raise ToolError("pattern must be a non-empty string")
-        target = _resolve(path) if path else WORKDIR
+        target = self._path(path) if path else self.workdir
         try:
             limit = max(1, min(int(max_results or 250), 2000))
         except (TypeError, ValueError):
@@ -408,7 +416,7 @@ class ToolTaskEnv(ShellTaskEnv):
     def tool_glob(self, pattern: str, path: Any = None) -> str:
         if not isinstance(pattern, str) or not pattern:
             raise ToolError("pattern must be a non-empty string")
-        base = _resolve(path) if path else WORKDIR
+        base = self._path(path) if path else self.workdir
         r = self.session.exec(
             f"find {shlex.quote(base)} -type f -not -path '*/.git/*' -not -path '*/node_modules/*' "
             f"2>/dev/null | head -n 20000", timeout=60, output_limit=4 * 1024 * 1024)

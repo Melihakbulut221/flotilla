@@ -5,6 +5,8 @@
     flotilla run --inputs inputs.jsonl --command 'python rollout.py' --result-path /work/result.json --wait
     flotilla serve --port 8642 --token "$FLOTILLA_TOKEN"
     flotilla list | get ID | results ID -o results.jsonl | cancel ID
+    flotilla verl export --kind code tasks.jsonl -o train.parquet
+    flotilla verl import mimo_rows.parquet -o tasks/     # writes tasks/<kind>.jsonl
 
 ``run`` without ``--url`` executes in this process (and therefore must wait).
 With ``--url`` (or ``$FLOTILLA_URL``) it submits to a server.
@@ -17,6 +19,7 @@ import json
 import os
 import signal
 import sys
+from pathlib import Path
 
 from . import __version__
 from .backends import doctor
@@ -109,6 +112,29 @@ def cmd_serve(args) -> int:
     return 0
 
 
+def cmd_verl(args) -> int:
+    from . import verl
+
+    if args.verl_cmd == "export":
+        tasks = [json.loads(line) for line in open(args.input) if line.strip()]
+        rows = verl.to_verl_rows(tasks, args.kind, split=args.split)
+        verl.write_rows(rows, args.output)
+        print(f"wrote {len(rows)} verl rows to {args.output}", file=sys.stderr)
+        return 0
+    rows = verl.read_rows(args.input)
+    by_kind, skipped = verl.import_rows(rows, image_repo=args.image_repo, apptainer=args.apptainer)
+    out = Path(args.output)
+    out.mkdir(parents=True, exist_ok=True)
+    for kind, tasks in sorted(by_kind.items()):
+        with open(out / f"{kind}.jsonl", "w") as f:
+            for t in tasks:
+                f.write(json.dumps(t) + "\n")
+        print(f"{kind:6s} {len(tasks):6d} tasks -> {out / (kind + '.jsonl')}", file=sys.stderr)
+    for reason, n in skipped.most_common():
+        print(f"skipped {n:6d}  {reason}", file=sys.stderr)
+    return 0 if by_kind else 1
+
+
 def cmd_doctor(args) -> int:
     report = doctor()
     for name, (ok, why) in report.items():
@@ -152,6 +178,20 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--verbose", action="store_true")
     s.set_defaults(fn=cmd_serve)
 
+    vp = sub.add_parser("verl", help="convert between flotilla tasks and verl RL rows")
+    vsub = vp.add_subparsers(dest="verl_cmd", required=True)
+    ve = vsub.add_parser("export", help="flotilla tasks (JSON Lines) -> verl rows (.parquet or .jsonl)")
+    ve.add_argument("input")
+    ve.add_argument("--kind", required=True, choices=["code", "music", "shell", "tool"])
+    ve.add_argument("--split", default="train")
+    ve.add_argument("-o", "--output", required=True)
+    vi = vsub.add_parser("import", help="verl or MiMo rows -> flotilla tasks, one JSON Lines file per kind")
+    vi.add_argument("input", help=".parquet, .jsonl, or .json (list or datasets-server dump)")
+    vi.add_argument("-o", "--output", required=True, help="output directory")
+    vi.add_argument("--image-repo", default="docker.io/xiaomimimo/mimo-v2.6-rl-oss")
+    vi.add_argument("--apptainer", action="store_true", help="emit docker:// image references")
+    vp.set_defaults(fn=cmd_verl)
+
     d = sub.add_parser("doctor", help="show which backends work on this machine")
     d.set_defaults(fn=cmd_doctor)
 
@@ -168,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     try:
         return args.fn(args)
-    except SpecError as e:
+    except (SpecError, RuntimeError, FileNotFoundError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
 

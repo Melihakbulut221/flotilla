@@ -15,6 +15,7 @@
   <a href="#swarms">Swarms</a> &middot;
   <a href="#rl-environments">RL environments</a> &middot;
   <a href="#reward-hacking-resistance">Reward hacking</a> &middot;
+  <a href="#verl-and-mimo-datasets">verl</a> &middot;
   <a href="#backends-and-threat-model">Backends</a> &middot;
   <a href="#how-it-compares">Compare</a>
 </p>
@@ -311,20 +312,28 @@ assistant  SUBMIT                                   -> hidden verifier runs -> r
 Files persist between turns. When the episode ends, the verifier does not
 run in the sandbox the agent controlled:
 
-1. The agent's `/work` is packed and rebuilt on the host. Only regular files
-   and directories survive, so symlinks, devices and absolute or `..` paths
-   are dropped.
-2. It is unpacked into a **fresh sandbox**, where the task's input files
-   outside `/work` are written again unmodified and `setup` runs again.
-3. The hidden `verify_files` are written and `verify` runs:
+1. The agent's working directory (`/work`, or the task's `workdir`) is packed
+   and rebuilt on the host. Kept: regular files, directories, and relative
+   symlinks that stay inside the directory. Dropped: absolute or escaping
+   links, devices, and absolute or `..` paths.
+2. A **fresh sandbox** is opened from the same image. The task's input files
+   outside the working directory are written again unmodified, `setup` runs
+   again, and then the optional `verify_prepare` runs.
+3. The working directory is emptied and replaced by the agent's snapshot, so
+   files the agent deleted stay deleted.
+4. The hidden `verify_files` are written and `verify` runs:
    - exit 0 gives reward 1, anything else gives 0;
-   - a `FLOTILLA_REWARD=<float>` line in its output gives partial credit
-     instead.
+   - if the **last** line of stdout is `FLOTILLA_REWARD=<float>`, that value
+     is the reward instead (partial credit). A marker printed earlier, for
+     example by agent code the tests ran, is ignored.
 
 Overwriting a reference file, planting something in `/tmp`, or leaving a
 module for the verifier to import therefore has no effect. Deliverables must
-live in `/work`. Use `isolated_verify=False` only for tasks whose result is
-state outside it.
+live in the working directory. Use `isolated_verify=False` only for tasks
+whose result is state outside it.
+
+Tasks can also set `image`, `size` and `verify_timeout`. File contents may be
+text or `{"base64": "..."}`.
 
 ### Tool-calling agents
 
@@ -437,6 +446,75 @@ tests prove the protections work. `assert` mode (tests as Python source) is also
 supported for convenience, but it shares a process with the solution. Prefer
 `io` mode for training.
 
+## verl and MiMo datasets
+
+`flotilla.verl` converts between flotilla tasks and [verl](https://github.com/volcengine/verl)
+RL rows, and gives verl a reward function backed by flotilla.
+
+```bash
+pip install pyarrow                                   # only for .parquet; .jsonl needs nothing
+flotilla verl export --kind code examples/tasks/code_tasks.jsonl -o code_train.parquet
+flotilla verl export --kind music examples/tasks/music_tasks.jsonl -o music_train.parquet
+```
+
+```bash
+python -m verl.trainer.main_ppo \
+  data.train_files=code_train.parquet \
+  custom_reward_function.path=$(python -c "import flotilla.verl as v; print(v.__file__)") \
+  custom_reward_function.name=compute_score_batch reward_model.reward_manager=batch ...
+```
+
+The `custom_reward_function.*` and `reward_model.reward_manager` keys are
+the ones in verl's PPO trainer config. Check them against the verl version
+you run, since verl config keys move between releases.
+
+Row schema:
+
+- `prompt` is a chat message list.
+- `reward_model.ground_truth` is a JSON string, so every row has the same
+  Parquet schema.
+- `extra_info.task_json` carries the full task, so an export can be
+  imported back unchanged.
+
+Scoring:
+
+- `compute_score` is the per-sample entry point; `compute_score_batch` is
+  for the batch reward manager.
+- With `compute_score_batch`, every code completion in a batch runs in one
+  swarm.
+- Every flotilla result is `{"score", "infra"}`.
+- Other `data_source` values fall back to verl's own `default_compute_score`.
+
+`flotilla verl import` reads rows from
+[MiMo-V2.6-RL-oss](https://huggingface.co/datasets/XiaomiMiMo/MiMo-V2.6-RL-oss), as
+Parquet, JSON Lines or a datasets-server JSON dump, and writes one
+`<kind>.jsonl` file per kind:
+
+| MiMo split | Becomes | What it needs |
+|---|---|---|
+| `music` | a music task; tempo, meter and voices come from `extra_info`, key and bar count are parsed from the Chinese or English prompt | nothing (no Docker) |
+| `general` (`terminal_bench`) | a tool task on the row's image; `tests_files` are written at verification and `reward.txt` is the reward | a container backend |
+| `code` (`opensource-code`) | a tool task on the row's image; files touched by the hidden test patch are restored from the image, then the patch is applied and `test_command` runs | a container backend |
+| `cyber`, `webdev` | skipped, with a reason | an in-image grading server, or a browser and a vision judge |
+
+The MiMo music scorer does not read these constraints, so the import is what
+makes them gradable. For the code split, restoring the touched files does
+two jobs:
+
+- an always-passing test the agent planted is replaced;
+- an honest agent that edited a test file while working still has the hidden
+  patch apply.
+
+`tests/test_verl.py` shows both, including that the same honest fix scores 0
+without the restore.
+
+Image references point at Docker Hub's `xiaomimimo/mimo-v2.6-rl-oss`. The
+mapping from the rows' bare image names to its tags is inferred from that
+repository's tag list; the dataset does not document it. Pass `--apptainer`
+for `docker://` references on HPC. The image-based imports were tested on
+bwrap, with the image's state recreated by `setup`; they have not been run
+against the real images.
+
 ## Backends and threat model
 
 | Backend | Isolation | Needs | Notes |
@@ -489,9 +567,10 @@ flotilla/session.py     persistent sandboxes for multi-turn environments
 flotilla/backends/      bwrap, docker/podman, apptainer, local
 flotilla/server.py      HTTP API (stdlib)
 flotilla/client.py      one client for in-process and remote use
+flotilla/verl.py        verl row export/import, MiMo import, verl reward functions
 flotilla/rl/            code verifier, music scorer, shell and tool-calling envs, rollouts, reward shaping, TRL adapters
 examples/               task sets, eval, GRPO training, rollout collection
-tests/                  swarm, isolation, reward-hacking, shaping, tool-calling, music and server tests
+tests/                  swarm, isolation, reward-hacking, shaping, tool-calling, music, verl and server tests
 ```
 
 ## Tests
