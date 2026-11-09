@@ -53,8 +53,10 @@ The parser covers the ABC subset LLMs actually write:
 - ties, broken rhythm (``>`` ``<``) and tuplets ``(3``;
 - bar lines and repeats.
 
-It skips decorations, chord symbols, grace notes and lyrics. It never
-executes anything, and its input is capped in size.
+It skips decorations, chord symbols, grace notes and lyrics. A run of letters
+that is not made of notes and decorations (a word such as ``bar``) counts as
+unreadable, so prose inside a tune body cannot pass as notes. The parser
+never executes anything, and its input is capped in size.
 """
 
 from __future__ import annotations
@@ -245,7 +247,10 @@ _NOTE = re.compile(r"(\^\^|\^|__|_|=)?([A-Ga-g])([,']*)(\d*)(/*)(\d*)")
 _REST = re.compile(r"([zx])(\d*)(/*)(\d*)")
 _MREST = re.compile(r"Z(\d*)")
 _FIELD_LINE = re.compile(r"^([A-Za-z]):(.*)$")
-_DECORATION_LETTERS = set("HIJKLMNOPQRSTUVWYhijklmnopqrstuvwy~.")
+# ABC 2.1 single-character decorations, plus the y spacer
+_DECORATION_LETTERS = set("~.HLMOPSTuvy")
+_NOTE_RUN_OK = set("ABCDEFGabcdefgzxZ") | _DECORATION_LETTERS
+_WORD = re.compile(r"[A-Za-z]{2,}")
 
 
 def _length(num: str, slashes: str, den: str) -> Fr:
@@ -457,6 +462,13 @@ def parse_abc(src: str) -> Piece:
                 v.broken_next = short if c == ">" else long_
                 i = j
             else:
+                w = _WORD.match(line, i)
+                if w and not set(w.group(0)) <= _NOTE_RUN_OK:
+                    # a word such as "bar" or "Intro": prose, not "b a" plus a decoration
+                    p.unknown_chars += len(w.group(0))
+                    p.body_chars += len(w.group(0)) - 1
+                    i = w.end()
+                    continue
                 m = _NOTE.match(line, i)
                 if m:
                     dur = (p.unit or Fr(1, 8)) * _length(m.group(4), m.group(5), m.group(6))

@@ -34,6 +34,7 @@ def main():
     ap.add_argument("--temperature", type=float, default=0.8)
     ap.add_argument("--max-tokens", type=int, default=2048)
     ap.add_argument("--limit", type=int, help="only the first N tasks")
+    ap.add_argument("--system", help="system prompt to prepend (e.g. ABC format instructions)")
     ap.add_argument("--midi-dir", help="write a .mid file per scored completion")
     ap.add_argument("--out", help="write completions and score breakdowns as JSON Lines")
     args = ap.parse_args()
@@ -49,7 +50,8 @@ def main():
                                   temperature=args.temperature, max_tokens=args.max_tokens)
         flat = [t for t in tasks for _ in range(args.samples)]
         with ThreadPoolExecutor(16) as pool:
-            completions = list(pool.map(lambda t: policy([{"role": "user", "content": t["prompt"]}]), flat))
+            sys_msg = [{"role": "system", "content": args.system}] if args.system else []
+            completions = list(pool.map(lambda t: policy(sys_msg + [{"role": "user", "content": t["prompt"]}]), flat))
 
     scores = MusicReward().score(completions, flat)
     parts = ("key", "meter", "tempo", "bars", "voices")

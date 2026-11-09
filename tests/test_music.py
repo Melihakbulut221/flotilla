@@ -204,3 +204,11 @@ def test_midi_output():
 def test_reference_pieces_cover_the_mimo_distribution(c):
     s = score_abc(f"```abc\n{reference_piece(c)}\n```", c)
     assert s.adherence["score"] == 1.0, s.adherence
+
+
+def test_prose_in_the_body_is_not_read_as_notes():
+    # found in a real model output: "\\bar" lines were parsed as the notes b and a
+    p = parse_abc('X:1\nM:4/4\nL:1/8\nK:Dm\n\\bar "|"\nBar:4|V:1|Intro here\n')
+    assert not p.voices and p.unknown_chars >= len("bar") + len("Bar") + len("Intro") + len("here")
+    ok = parse_abc("X:1\nM:4/4\nL:1/8\nK:G\nTGAB cdef|uga vfe dcBA|\n")    # T, u, v decorations
+    assert len(ok.voices["1"]) == 15 and ok.unknown_chars == 0
