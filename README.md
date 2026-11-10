@@ -295,7 +295,13 @@ adherence stay at 0. GRPO from that start has almost no signal.
 `flotilla.rl.music_sft` builds a supervised set from the Nottingham folk-tune
 collection: 6060 examples, English and Chinese prompts, 30 keys, one to six
 voices. Every example is checked to get full adherence from the RL reward.
-`examples/sft_music.py` trains a LoRA on it.
+`examples/sft_music.py` trains a LoRA on it. On an 8 GB laptop GPU, two
+epochs take 3.6 hours. The result on 200 MiMo rows:
+
+- mean reward goes from 0.000 to **0.708**;
+- valid ABC goes from 0 to 197 of 200;
+- Chinese prompts score 0.89, English prompts 0.53;
+- many completions imitate the synthetic examples.
 
 ```bash
 python examples/build_music_sft.py --download && python examples/build_music_sft.py

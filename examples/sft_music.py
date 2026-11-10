@@ -1,10 +1,10 @@
 """LoRA SFT warm-up on the music set, before GRPO with the music reward.
 
 Needs ``pip install torch transformers "trl>=0.20" peft datasets``. Sized
-for one 8 GB GPU: a 1.5B model in bf16 with LoRA, gradient checkpointing
-and sequences up to 4096 tokens. The data is fed as conversational
+for one 8 GB GPU: a 1.5B model in bf16 with LoRA, gradient checkpointing,
+micro-batches of one (16 accumulated) and sequences up to 4096 tokens. The data is fed as conversational
 prompt/completion pairs, so the loss covers the assistant's ABC only.
-Written against the TRL 0.20 API; not run in this repository's CI.
+Tested with transformers 5.22, TRL 1.17 and PEFT 0.21 (warmup_steps takes a ratio; warmup_ratio is gone).
 
     python examples/build_music_sft.py --download
     python examples/sft_music.py --model Qwen/Qwen2.5-1.5B-Instruct --epochs 2
@@ -17,7 +17,11 @@ vLLM and run::
 """
 
 import argparse
+import os
 from pathlib import Path
+
+# the 152k-token vocabulary makes the logits the largest tensor; avoid fragmentation on 8 GB
+os.environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")
 
 
 def main():
@@ -27,12 +31,14 @@ def main():
     ap.add_argument("--output-dir", default="runs/sft-music")
     ap.add_argument("--epochs", type=float, default=2)
     ap.add_argument("--lr", type=float, default=2e-4)
-    ap.add_argument("--batch-size", type=int, default=2)
-    ap.add_argument("--grad-accum", type=int, default=8)
+    ap.add_argument("--batch-size", type=int, default=1)
+    ap.add_argument("--grad-accum", type=int, default=16)
     ap.add_argument("--max-length", type=int, default=4096)
     ap.add_argument("--lora-r", type=int, default=32)
     ap.add_argument("--no-synthetic", action="store_true", help="train on the real tunes only")
     ap.add_argument("--no-merge", action="store_true", help="keep only the LoRA adapter")
+    ap.add_argument("--max-steps", type=int, default=-1, help="stop early (for a dry run)")
+    ap.add_argument("--eval-steps", type=int, default=100)
     args = ap.parse_args()
 
     import torch
@@ -49,20 +55,24 @@ def main():
     ds = ds.map(lambda r: {"prompt": r["messages"][:1], "completion": r["messages"][1:]},
                 remove_columns=ds["train"].column_names)
 
+    bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
     cfg = SFTConfig(
         output_dir=args.output_dir,
         num_train_epochs=args.epochs,
+        max_steps=args.max_steps,
         learning_rate=args.lr,
         lr_scheduler_type="cosine",
-        warmup_ratio=0.03,
+        warmup_steps=0.03,            # a float below 1 is a ratio of total steps
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
         gradient_accumulation_steps=args.grad_accum,
         gradient_checkpointing=True,
-        bf16=torch.cuda.is_available() and torch.cuda.is_bf16_supported(),
+        bf16=bf16,
+        # TRL loads a model given by name in float32 unless told otherwise: 6 GB for 1.5B
+        model_init_kwargs={"dtype": torch.bfloat16 if bf16 else torch.float32},
         max_length=args.max_length,
         eval_strategy="steps",
-        eval_steps=100,
+        eval_steps=args.eval_steps,
         logging_steps=10,
         save_steps=200,
         save_total_limit=2,

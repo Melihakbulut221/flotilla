@@ -9,3 +9,4 @@ rollouts.jsonl
 .venv/
 .claude/
 data/
+.venv-train/

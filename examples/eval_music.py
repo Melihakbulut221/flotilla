@@ -27,6 +27,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tasks", default=str(Path(__file__).parent / "tasks" / "music_tasks.jsonl"))
     ap.add_argument("--references", action="store_true", help="score generated compliant pieces")
+    ap.add_argument("--completions", help="score pre-generated completions: JSON Lines with task_id, completion")
     ap.add_argument("--base-url")
     ap.add_argument("--model")
     ap.add_argument("--api-key")
@@ -43,9 +44,14 @@ def main():
     if args.references:
         flat = tasks
         completions = [f"```abc\n{reference_piece(t['constraints'], i)}\n```" for i, t in enumerate(tasks)]
+    elif args.completions:
+        by_id = {t["id"]: t for t in tasks}
+        rows = [json.loads(line) for line in open(args.completions) if line.strip()]
+        flat = [by_id[r["task_id"]] for r in rows if r["task_id"] in by_id]
+        completions = [r["completion"] for r in rows if r["task_id"] in by_id]
     else:
         if not (args.base_url and args.model):
-            ap.error("--base-url and --model are required unless --references")
+            ap.error("--base-url and --model are required unless --references or --completions")
         policy = OpenAIChatPolicy(args.base_url, args.model, api_key=args.api_key,
                                   temperature=args.temperature, max_tokens=args.max_tokens)
         flat = [t for t in tasks for _ in range(args.samples)]
